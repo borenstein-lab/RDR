@@ -1,0 +1,187 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This section visualizes the quality of predictions made after fecal microbiota transplantation (FMT) using various taxa.
+
+
+# Library
+```{r}
+library(tidymodels)
+library(stringr)
+library(readxl)
+library(ggplot2)
+library(RColorBrewer)
+library(ggrepel)
+library(tidyverse)
+library(ggpubr)
+
+```
+
+# Import files
+```{r}
+#Import prediction result file
+prediction_metrics <- read_csv("SET_PATH")
+  
+# Import SHAP results file
+tidy_shap <- read_rds("SET_PATH")
+
+```
+
+# post-FMT prediction analysis
+
+## Plot prediction quality
+
+```{r fig.width=15, fig.height=4}
+
+#orgenize data for ploting
+prediction_rsq <- prediction_metrics%>%
+  filter(metric == "rsq")%>%
+  rename(rsq = mean)%>%
+  select(predicted_taxa, rsq)%>%
+  mutate(rsq = round(as.numeric(rsq), 2))
+
+prediction_spearman <- prediction_metrics%>%
+  filter(metric == "spearman")%>%
+  mutate(fdr_p_value = p.adjust(p_value, "fdr"))%>%
+  filter(mean >=0.3& fdr_p_value<0.05)%>%
+  mutate(genus = str_extract(predicted_taxa, "g__(.*)"),
+         genus = str_remove(genus, "g__"),
+         phylum = str_extract(predicted_taxa, "(?<=p__)(.*)(?=_c)"),
+         phylum = str_remove(phylum, "p__"))%>%
+  mutate(mean = as.numeric(mean))%>%
+  left_join(prediction_rsq)%>%
+  filter(predicted_taxa %in% pairs_list$predicted_taxa) # filter out taxa that have no pairs
+
+prediction_spearman$genus = as_factor(prediction_spearman$genus)%>%
+  fct_reorder(., prediction_spearman$mean)
+
+# plot
+ggplot(prediction_spearman, aes(x = genus, y = mean))+
+  geom_bar( aes(fill = phylum), stat = "identity", color = "white")+
+  theme_bw(base_size =15)+
+  # geom_text( hjust = 0, size = 3)+
+  # coord_cartesian(xlim = c(0.2,0.75))+
+  scale_fill_brewer(palette = "Paired", "Phylum")+
+  # scale_alpha_continuous(range = c(0.4,0.7))+
+  labs(y = "Predictability", x = "Taxa")+
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank())+
+  # guides(alpha = "none", fill = "none")+
+  guides(alpha = "none")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+```
+
+## Axilery rsq plot
+
+```{r fig.width=15, fig.height=1.5}
+
+# rsq plot
+
+ggplot(prediction_spearman, aes(x = genus, y = rsq))+
+  geom_point( aes(fill = phylum), color = "white", shape = 21, size = 5)+
+  theme_bw(base_size =15)+
+  # geom_text( hjust = 0, size = 3)+
+  # coord_cartesian(xlim = c(0.2,0.75))+
+  scale_fill_brewer(palette = "Paired", "Phylum")+
+  labs(y = expression("R"^2), x = "")+
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.text.x = element_blank())+
+  guides(alpha = "none", fill = "none")
+
+# p-value plot
+ggplot(prediction_spearman, aes(x = genus, y = -log10(fdr_p_value)))+
+  geom_point( aes(fill = phylum), color = "white", shape = 21, size = 5)+
+  theme_bw(base_size =15)+
+  # geom_text( hjust = 0, size = 3)+
+  # coord_cartesian(xlim = c(0.2,0.75))+
+  scale_fill_brewer(palette = "Paired", "Phylum")+
+  labs(y = "p value\n (-log10)", x = "")+
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.text.x = element_blank())+
+  guides(alpha = "none", fill = "none")
+
+
+```
+
+# SHAP analysis
+
+```{r}
+### find shap value of each group (same taxa, pairs and non-pairs) ###
+shap_with_pairs <- tidy_shap%>%
+  filter(predicted_taxa %in% pairs_list$predicted_taxa)%>% # take only taxa that have pairs
+  filter(predicted_taxa %in% prediction_spearman$predicted_taxa)%>% # take only taxa with spearman>0.3
+  left_join(pairs_list, by = c("feature_taxa", "predicted_taxa"))%>%
+  mutate(pairs = case_when(predicted_taxa == feature_taxa ~ "Self"),
+         group = coalesce(group, pairs))%>%
+  select(-pairs)%>%
+  replace_na(list(group = "Non partners"))%>%
+    mutate(group = if_else(group == "Pairs", true = "Partners", false = group))
+
+per_taxa_shap <- shap_with_pairs%>%
+  group_by(predicted_taxa , group, feature_source)%>%
+  summarise(mean_shap = mean(mean_shap),
+            n_features = n())%>%
+  ungroup()%>%
+  mutate(group_source = str_c(group, "_", feature_source),
+         feature_source = str_to_sentence(str_replace_all(feature_source, pattern = "_", replacement = " ")))%>%
+    mutate(genus = str_extract(predicted_taxa, "g__(.*)"),
+         genus = str_remove(genus, "g__"))
+
+### Plot
+
+p_value_table <- per_taxa_shap%>%
+  rstatix::group_by(feature_source)%>%
+  rstatix::t_test(., mean_shap~group,  p.adjust.method = "BH" )%>%
+  rstatix::add_xy_position()
+
+ggplot(per_taxa_shap, aes(x =  group, y = mean_shap*1000 ))+
+  geom_boxplot(aes(fill = group_source), alpha = 0.1, outlier.shape = NA)+
+  geom_jitter(aes(color = group_source), width = 0.3, alpha = 0.15, size = 4) + 
+  # stat_summary(geom = "crossbar", fun = "mean", colour = "grey20", width = 0.4, size = 0.5, alpha = 0.6)+
+  theme_bw()+
+  coord_cartesian(ylim = c(0,0.8))+
+  labs(y = "Mean SHAP", x = "Group")+
+  scale_color_manual(values = c("#005F73","#0A9396",  "#CA6702", "#EE9B00", "#9B2226", "#AE2012"))+
+  scale_fill_manual(values = c("#005F73","#0A9396",  "#CA6702", "#EE9B00", "#9B2226", "#AE2012"))+
+  add_pvalue(p_value_table,tip.length = 0,  y.position = seq(0.5, by = 0.05, length.out = nrow(p_value_table)))+
+  guides(color = "none",  fill = "none")+
+  facet_wrap(vars(feature_source))+
+  theme(axis.text.x = element_text(angle = 90))
+
+p_value_table <- per_taxa_shap%>%
+  filter(group != "Self")%>%
+  mutate( feature_source = if_else(feature_source == "Donor pre fmt", true = "Donor pre-FMT", false = "Recipient pre-FMT"))%>%
+  rstatix::group_by(feature_source)%>%
+  rstatix::wilcox_test(., mean_shap~group,  p.adjust.method = "BH" )%>%
+  rstatix::add_xy_position()
+
+per_taxa_shap%>%
+  filter(group != "Self")%>%
+  mutate( feature_source = if_else(feature_source == "Donor pre fmt", true = "Donor pre-FMT", false = "Recipient pre-FMT"))%>%
+  ggplot(., aes(x =  group, y = mean_shap*1000 ))+
+  geom_boxplot(aes(fill = group_source), alpha = 0.1, outlier.shape = NA)+
+  geom_jitter(aes(color = group_source), width = 0.3, alpha = 0.15, size = 4) + 
+  # geom_line(aes(group = predicted_taxa))%>%
+  # stat_summary(geom = "crossbar", fun = "mean", colour = "grey20", width = 0.4, size = 0.5, alpha = 0.6)+
+  theme_bw(base_size = 15)+
+  coord_cartesian(ylim = c(0,0.7))+
+  labs(y = "Mean SHAP", x = "Group")+
+  scale_color_manual(values = c("#005F73","#0A9396",  "#CA6702", "#EE9B00", "#9B2226", "#AE2012"))+
+  scale_fill_manual(values = c("#005F73","#0A9396",  "#CA6702", "#EE9B00", "#9B2226", "#AE2012"))+
+  add_pvalue(p_value_table,tip.length = 0,  y.position = seq(0.15, by = 0.02, length.out = nrow(p_value_table)))+
+  guides(color = "none",  fill = "none")+
+  facet_wrap(vars(feature_source))+
+  theme(axis.text.x = element_text(angle = 0))
+  # coord_cartesian(y = c(0, 0.2))
+
+```
+

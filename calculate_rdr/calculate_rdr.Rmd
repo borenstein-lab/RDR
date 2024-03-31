@@ -1,0 +1,122 @@
+---
+title: "Calculate RDR"
+output: html_notebook
+---
+
+# Set up
+
+
+# Import library
+
+# Import data
+
+```{r}
+
+
+
+tmp_1 <- data_for_pair_analysis_asv$fmt_outcome[[1]]%>%
+  filter(post_fmt_result  == "Colonization")%>%
+  rename(recipient_post_fmt = "7")%>%
+  select(subject_id, taxon, recipient_post_fmt, donor_pre_fmt)%>%
+  mutate(time_point_post = "7",
+         study_name = "goyal")
+
+tmp_2 <- data_for_pair_analysis_asv$fmt_outcome[[2]]%>%
+  filter(post_fmt_result  == "Colonization")%>%
+  rename(recipient_post_fmt = "30")%>%
+  select(subject_id, taxon, recipient_post_fmt, donor_pre_fmt)%>%
+  mutate(time_point_post = "30",
+         study_name = "goyal")
+
+tmp_3 <- data_for_pair_analysis_asv$fmt_outcome[[3]]%>%
+  filter(post_fmt_result  == "Colonization")%>%
+  rename(recipient_post_fmt = "180")%>%
+  select(subject_id, taxon, recipient_post_fmt, donor_pre_fmt)%>%
+  mutate(time_point_post = "180",
+         study_name = "goyal")
+
+fmt_outcome <- bind_rows(tmp_1, tmp_2, tmp_3)%>%
+  mutate(taxon_id = dense_rank(taxon))%>%
+  mutate(experiment_id = str_c(subject_id, "_d", time_point_post))%>%
+  select(-study_name, -time_point_post, -subject_id )
+
+```
+
+# Calculate RDR for colonizing pairs
+
+```{r}
+taxa_two <- fmt_outcome%>%
+  rename(taxa_two = taxon,
+         recipient_post_fmt_two =recipient_post_fmt ,
+         donor_pre_fmt_two = donor_pre_fmt,
+         taxon_id_two = taxon_id)
+
+rdr_data <- fmt_outcome%>%
+    rename(taxa_one = taxon,
+           recipient_post_fmt_one = recipient_post_fmt ,
+           donor_pre_fmt_one = donor_pre_fmt,
+           taxon_id_one = taxon_id)%>%
+    left_join(taxa_two, by = "experiment_id")%>%
+    filter(taxon_id_one>taxon_id_two)%>%
+    rowwise()%>%
+    mutate(rdr  = log10(recipient_post_fmt_one/recipient_post_fmt_two)/(donor_pre_fmt_one /donor_pre_fmt_two),
+           pair_id = str_c(taxon_id_one, "_", taxon_id_two))%>%
+    ungroup()%>%
+    separate(experiment_id, into = c("subject_id", "time_point_post"), sep = "_d")
+
+
+```
+
+# Filter rare pairs
+```{r}
+
+#filter pairs with low number of samples
+pairs_subject_count <- rdr_data%>%
+  select(pair_id, subject_id)%>%
+  unique()%>%
+  count(pair_id)%>%
+  rename(n_subjects = n)
+
+# ggplot(pairs_study_count, aes(x = n))+
+#   geom_histogram()
+
+pairs_for_analysis <- pairs_subject_count%>%
+  filter(n_subjects>9)%>%
+  pull(pair_id)
+
+```
+
+
+# Find differentially dispersing pairs 
+
+```{r}
+random_effects_model <- rdr_data%>%
+  filter(pair_id %in% pairs_for_analysis)%>%
+  left_join(.,donor_metadata,  by = "subject_id")%>%
+  mutate(time_point_post = as.numeric(time_point_post),
+         subject_id = as.factor(subject_id))%>%
+  #run linear mixed effect model for every pair
+  group_by(pair_id)%>%
+  group_map(.keep = TRUE, .f = ~{
+    
+  rme_results <- lmerTest::lmer(rdr ~ 1 + (1 | subject_id) + (1 | donor_id), data = .x,
+                                control=lmerControl(check.nobs.vs.nlev = "ignore",
+                                                    check.nobs.vs.rankZ = "ignore",
+                                                    check.nobs.vs.nRE="ignore")
+                                )
+
+  rem <- summary(rme_results)$coefficients%>%
+    as_tibble(.)%>%
+    rename(p_value = "Pr(>|t|)", t_value = "t value")%>%
+    mutate(pair_id = .x$pair_id[[1]])
+    
+  return(rem)
+    
+  })%>%
+  bind_rows()
+
+
+```
+
+
+# Plot
