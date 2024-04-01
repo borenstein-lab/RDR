@@ -17,9 +17,12 @@
 #' @param min_subjects Minimum number of subjects required for analysis.
 #' @param alpha Significance level for determining statistical significance.
 #' @param statistical_test Method for statistical testing ("wilcoxon" or "lmer").
+#' - 'wilcoxon': Wilcoxon rank-sum test. Can be used in case we dont need to correct for confounders (etc, multiple samples from the same donor/subject).
+#' - 'lmer': Linear mixed-effects model. Can be used when we need to correct for confounders (e.g., multiple samples from the same donor/subject).
 #' @param stat_signif_pairs_output_file Path to the output file for storing differently dispersing pairs results.
 #' @param rdr_output_file Path to the output file for storing RDR data.
- 
+#' @return A list of differentially dispersing pairs and RDR data.
+#' 
 # Set up 
 
 ##Settings
@@ -40,12 +43,7 @@ stat_signif_pairs_output_file <- "stat_signif_pairs.csv"
 rdr_output_file <- "rdr_data.csv"
 
 ## Check and install required packages
-required_packages <- c(
-  "tidymodels", "stringr", "readxl", "ggplot2", "RColorBrewer", "ggrepel",
-  "tidyverse", "forcats", "ape", "workflowsets", "ggpubr", "ggridges",
-  "ggstream", "tidygraph", "ggraph", "ggdist", "corrr", "vegan", "nlme", 
-  "cowplot", "lme4"
-)
+required_packages <- c("stringr", "tidyverse", "forcats", "nlme")
 
 for (pkg in required_packages) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
@@ -53,31 +51,13 @@ for (pkg in required_packages) {
   }
 }
 
-library(tidymodels)
-library(stringr)
-library(readxl)
-library(ggplot2)
-library(RColorBrewer)
-library(ggrepel)
-library(tidyverse)
-library(forcats)
-library(ape)
-library(workflowsets)
-library(ggpubr)
-library(ggridges)
-library(ggstream)
-library(tidygraph)
-library(ggraph)
-library(ggdist)
-library(corrr)
-library(vegan)
-library(nlme)
-library(cowplot)
-library(lme4)
+library(stringr) # stringr_1.4.0
+library(tidyverse) # tidyverse_2.0.0    
+library(forcats) # forcats_1.0.0      
+library(nlme) # nlme_3.1-157
+library(readr) # readr_1.4.0
 
-# Import data
-
-# Define function to find statistically significant pairs
+## Define function to find statistically significant pairs
 #' Find statistically significant pairs
 #' 
 #' This function calculates statistical significance for each pair of taxa.
@@ -116,10 +96,11 @@ find_stat_signif_pairs <- function(.x, method = "wilcoxon"){
   return(results)
 }
 
-# Import data 
+## Import data 
 fmt_outcome <- read_rds(data_file)
 
-# Calculate the relative dispersal ratio (RDR) for each pair of taxa
+# Main
+## Calculate the relative dispersal ratio (RDR) for each pair of taxa
 
 taxa_two <- fmt_outcome%>%
   rename(taxa_two = taxon,
@@ -141,7 +122,7 @@ rdr_data <- fmt_outcome%>%
     separate(experiment_id, into = c("subject_id", "time_point_post"), sep = "_d")
 
 
-#Filter pairs with low number of samples
+##Filter pairs with low number of samples
 pairs_subject_count <- rdr_data%>%
   select(pair_id, subject_id)%>%
   unique()%>%
@@ -175,6 +156,6 @@ test_stat_signif_pairs<- rdr_data%>%
 stat_signif_pairs <- mutate(test_stat_signif_pairs, fdr_p_value = p.adjust(p_value, method = "fdr"))%>%
   filter(fdr_p_value<0.1)
 
-# Save results
+## Save results
 write_csv(test_stat_signif_pairs, stat_signif_pairs_output_file)
 write_csv(rdr_data, rdr_output_file)
