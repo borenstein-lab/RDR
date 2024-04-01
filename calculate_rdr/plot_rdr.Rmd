@@ -1,0 +1,157 @@
+---
+title: ""Plot RDR
+output: html_notebook
+---
+
+# Import library
+
+```{r}
+library(tidymodels)
+library(stringr)
+library(readxl)
+library(ggplot2)
+library(RColorBrewer)
+library(ggrepel)
+library(tidyverse)
+library(forcats)
+library(ape)
+library(workflowsets)
+library(ggpubr)
+library(ggridges)
+library(ggstream)
+library(tidygraph)
+library(ggraph)
+library(ggdist)
+library(corrr)
+library(vegan)
+library(nlme)
+library(cowplot)
+library(lme4)
+```
+
+
+# Import data
+```{r}
+data_for_plot <- read_rds("data_for_plot2.rds")
+full_matrix <- read_rds("data_for_plot2e")
+```
+
+# Plot RDR - FIgure 2A-D
+```{r}
+
+# Figure 2A
+color <- c(colorRampPalette(c("#5887ff", "#7400b8"))(number))
+
+ggplot(data_for_plot, aes(y= pair_genus, x = log10_pair_ratio, color = pair_genus))+
+  geom_vline(aes(xintercept = 0), color = "gray30", size = 2)+
+  geom_point(aes( y =pair_genus, x= mean), size = 5)+
+  # stat_summary(fun = "mean", geom = "point", size = 5) +
+  # geom_segment(aes(x = 0, xend = pair_genus,x = 0, yend = pair_genus),size = 0.8)+
+  geom_jitter(alpha = 0.1, size = 4,height = 0.1)+
+  geom_segment(aes(xend = 0, x = mean, y = pair_genus, yend = pair_genus), size = 1.5)+
+  theme_bw(base_size = 15)+
+  theme(legend.position="none")+
+  # scale_color_brewer(palette = "Spectral")+
+  # scale_color_brewer(palette = "Paired")+
+  scale_color_manual(values = color)+
+  labs(x = "RDR", y = "Co-colonizing pairs")
+  # geom_boxplot()
+
+# Figure 2B
+data_for_plot_stats <- data_for_plot%>%
+  select(pair_genus,fdr_p_value, n_samples, n_subjects)%>%
+  unique()
+
+ggplot(data_for_plot_stats, aes(y= pair_genus, x = -log10(fdr_p_value), fill = -log10(fdr_p_value)))+
+  geom_col()+
+  theme_bw(base_size = 15)+
+  scale_fill_gradient(low = "#F0BCAF", high = "#B83A1F", name = "FDR p value (-log10)")+
+  labs(x = "FDR p value (-log10)")+
+  theme(axis.title.y = element_blank(), axis.text.y.left = element_blank(), legend.position="none")
+
+# Figure 2C
+numbers_samples_subjects <- data_for_plot_stats%>%
+  select(-fdr_p_value )%>%
+  rename("Samples"= n_samples)%>%
+  pivot_longer(-pair_genus, names_to = "number", values_to = "value")
+
+ggplot(numbers_samples_subjects, aes(y= pair_genus, x = value, fill = value))+
+  geom_col()+
+  # geom_text(aes(label = value),hjust = 1, color = "black" )+
+  theme_bw(base_size = 15)+
+  scale_fill_gradient(low = "#9ecae1", high = "#2171b5", name = "FDR p value (-log10)")+
+  labs(x = "FMT experiments")+
+  theme(axis.title.y = element_blank(), axis.text.y.left = element_blank(), legend.position="none")
+
+#Figure 2D
+study_per_exmp_pairs <- data_for_plot%>%
+  select(pair_genus, study_name)%>%
+  unique()%>%
+  mutate(fill = 1)%>%
+  mutate(study_name = case_when(study_name == "autism" ~ "Autism Kang 2017",
+                                study_name == "c_diff_khanna"  ~ "C.diff Khanna 2017",
+                                study_name == "c_diff_seekatz" ~ "C.diff Seekatz 2014",
+                                study_name == "c_diff_zao" ~ "C.diff Zao 2018",
+                                study_name == "cancer" ~ "Melanoma Baruch 2020" ,
+                                study_name == "crohn_sokol" ~ "Crohn Sokol 2020",
+                                study_name == "goyal" ~ "IBD Goyal 2018",
+                                study_name == "uc_kump" ~ "UC Kump 2017",
+                                study_name == "c_diff_mintz" ~ "C.diff Mintz 2018"))
+
+study_per_exmp_pairs <- data_for_plot%>%
+  select(pair_genus, study_name, subject_id)%>%
+  count(pair_genus, study_name)%>%
+  mutate(fill = 1)%>%
+  left_join(n_subjects, by = c("study_name" = "study"))%>%
+  mutate(freq = n/n_subjects)%>%
+  mutate(study_name = case_when(study_name == "autism" ~ "Kang",
+                                study_name == "c_diff_khanna"  ~ "Khanna",
+                                study_name == "c_diff_seekatz" ~ "Seekatz",
+                                study_name == "c_diff_zao" ~ "Zao",
+                                study_name == "cancer" ~ "Baruch" ,
+                                study_name == "crohn_sokol" ~ "Sokol",
+                                study_name == "goyal" ~ "Goyal",
+                                study_name == "uc_kump" ~ "Kump",
+                                study_name == "c_diff_mintz" ~ "Mintz"))
+
+ggplot(study_per_exmp_pairs, aes(x =study_name , y= pair_genus, fill = study_name, label = n))+
+  geom_tile(color = "white")+
+  # geom_text()+
+  theme_bw(base_size = 15)+
+  theme(axis.text.x = element_text(angle = 90, vjust = -0.05), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.y = element_blank(), axis.text.y.left = element_blank(), legend.position="none")+
+  labs(x = "Study name")+
+  scale_fill_manual(values = c("#0072B2","#F55751","#E69F00", "#009E73", "#D55E00", "#CC79A7", "#56B4E9", "#F0E442"))
+
+```
+
+# Plot RDR - FIgure 2E
+
+```{r}
+color_1 <- full_matrix%>%
+    select(taxa_one_genus, taxa_one_phylum_color, factor_num_1)%>%
+    unique()%>%
+    arrange(desc(factor_num_1))
+    
+color_2 <- full_matrix%>%
+    select(taxa_two_genus, taxa_two_phylum_color, factor_num_2)%>%
+    unique()%>%
+    dplyr::arrange(desc(factor_num_2))
+    
+ggplot(full_matrix, aes(x = taxa_one_genus, y = taxa_two_genus))+
+  geom_point(aes(fill = mean, size = n_subjects), shape=21, color = "grey30" )+
+  geom_point(aes(alpha = highlight, size = n_subjects), color = "black", shape = 21, stroke = 2)+
+  scale_fill_gradient2(midpoint = 0, mid = "white", low = "#40004b", high = "#00441b", name = "Mean RDR")+
+  theme_classic(base_size = 15)+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, color = rev(color_1$taxa_one_phylum_color)),
+        axis.text.y = element_text(color =rev(color_2$taxa_two_phylum_color )))+
+  scale_size_binned(range = c(2,5), name = "# FMT experiments", n.breaks = 8)+
+  labs(x = "Taxa A", y = "Taxa B")+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_line(colour = "black"))+
+    scale_alpha_manual(name = "cut", values = c(0,1))
+```
+
+
+
