@@ -25,8 +25,8 @@
 ##Settings
 
 # Data file paths
-data_file <- "fmt_outcome.rds"
-metadata_file <- "donor_metadata.rds"
+data_file <- "fmt_outcome.csv"
+metadata_file <- "donor_metadata.csv"
 
 # Analysis parameters
 min_subjects <- 10 
