@@ -1,6 +1,8 @@
-Welcome!
 
 ![RDR](https://github.com/borenstein-lab/RDR/assets/88768420/67ff9537-bc3e-4a78-85fe-0b503e08a022)
+
+# Welcome!
+
 
 This folder includes code related to the pre-print "Microbial dispersion in the human gut through the lens of fecal transplant"
 
